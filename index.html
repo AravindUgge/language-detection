@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ultimate Language Detector</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-light: #f4f7fa;
+      --bg-dark: #1e1e2f;
+      --text-light: #111;
+      --text-dark: #f5f5f5;
+      --primary: #007bff;
+      --card-radius: 12px;
+      --transition: all 0.4s ease-in-out;
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 30px;
+      background-color: var(--bg-light);
+      color: var(--text-light);
+      transition: var(--transition);
+    }
+
+    .dark-mode {
+      background-color: var(--bg-dark);
+      color: var(--text-dark);
+    }
+
+    .container {
+      max-width: 800px;
+      margin: auto;
+      background: white;
+      padding: 30px;
+      border-radius: var(--card-radius);
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+      transition: var(--transition);
+    }
+
+    .dark-mode .container {
+      background: #2b2b40;
+    }
+
+    textarea {
+      width: 100%;
+      height: 150px;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      resize: vertical;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      font-size: 16px;
+      border-radius: 8px;
+      margin: 10px 5px 20px 0;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .detect-btn { background: var(--primary); color: white; }
+    .dark-toggle { background: #444; color: white; }
+    .mic-btn { background: #17a2b8; color: white; }
+
+    #result, #summary, #history {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: var(--card-radius);
+      background: #e8f5e9;
+      transition: var(--transition);
+    }
+
+    .dark-mode #result, .dark-mode #summary, .dark-mode #history {
+      background: #334;
+    }
+
+    .flag {
+      width: 32px;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    .keyword-cloud span {
+      font-size: 14px;
+      background: #d1ecf1;
+      margin: 4px;
+      padding: 5px 10px;
+      border-radius: 20px;
+      display: inline-block;
+    }
+
+    canvas { max-width: 100%; margin-top: 20px; }
+
+    h2 {
+      animation: fadeIn 1s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🌐 Ultimate Language Detector</h2>
+    <textarea id="inputText" placeholder="Type or speak here..."></textarea>
+    <br>
+    <button class="detect-btn" onclick="detectLanguage()">Detect</button>
+    <button class="mic-btn" onclick="startVoiceInput()">🎤 Speak</button>
+    <button class="dark-toggle" onclick="toggleDarkMode()">🌓 Toggle Dark Mode</button>
+
+    <div id="result" style="display:none"></div>
+    <div id="summary"></div>
+    <div class="keyword-cloud" id="keywords"></div>
+    <canvas id="probChart"></canvas>
+    <div id="history"></div>
+  </div>
+
+  <script>
+    let history = []
+
+    function updateHistory(data, input) {
+      history.unshift({ text: input, ...data });
+      const container = document.getElementById('history');
+      container.innerHTML = '<h4>🧾 Prediction History</h4>' +
+        history.map(h => `<p><b>${h.language}</b> (${(h.confidence*100).toFixed(1)}%)<br><small>${h.text}</small></p>`).join('');
+    }
+
+    async function detectLanguage() {
+      const text = document.getElementById('inputText').value.trim();
+      if (!text) return;
+
+      const resultDiv = document.getElementById('result');
+      resultDiv.style.display = 'none';
+      const res = await fetch('/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        resultDiv.innerText = data.error;
+        resultDiv.style.display = 'block';
+        return;
+      }
+
+      const flagURL = `https://flagcdn.com/48x36/${data.language.slice(0, 2).toLowerCase()}.png`;
+
+      resultDiv.innerHTML = `<h3><img class="flag" src="${flagURL}" onerror="this.style.display='none'"> ${data.language} (${(data.confidence*100).toFixed(2)}%)</h3>`;
+      resultDiv.style.display = 'block';
+
+      document.getElementById('summary').innerHTML =
+        `<p><strong>📌 Word Count:</strong> ${data.word_count} | <strong>Characters:</strong> ${data.char_count}<br>
+         <strong>🆎 Unique Words:</strong> ${data.unique_words} | <strong>❗Special Chars:</strong> ${data.special_chars}</p>`;
+
+      document.getElementById('keywords').innerHTML =
+        `<h4>🔥 Top Keywords</h4>` + data.keywords.map(k => `<span>${k}</span>`).join(' ');
+
+      renderChart(data.probabilities);
+      updateHistory(data, text);
+    }
+
+    function renderChart(probabilities) {
+      const ctx = document.getElementById('probChart');
+      const labels = [...Array(probabilities.length).keys()].map(i => 'Lang ' + (i+1));
+      const data = probabilities;
+
+      if (window.probChart) window.probChart.destroy();
+
+      window.probChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Language Confidence %',
+            data: data.map(p => p * 100),
+            backgroundColor: 'rgba(0, 123, 255, 0.6)',
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } },
+        }
+      });
+    }
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark-mode');
+    }
+
+    function startVoiceInput() {
+      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = 'en-US';
+      recognition.start();
+
+      recognition.onresult = (e) => {
+        document.getElementById('inputText').value = e.results[0][0].transcript;
+        detectLanguage();
+      };
+    }
+
+    // Auto detect with debounce
+    let timeout;
+    document.getElementById('inputText').addEventListener('input', () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => detectLanguage(), 1200);
+    });
+  </script>
+</body>
+</html>
