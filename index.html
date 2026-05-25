@@ -1,218 +1,536 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ultimate Language Detector</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Language Detector</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg-light: #f4f7fa;
-      --bg-dark: #1e1e2f;
-      --text-light: #111;
-      --text-dark: #f5f5f5;
-      --primary: #007bff;
-      --card-radius: 12px;
-      --transition: all 0.4s ease-in-out;
+      --bg:      #0d0d14;
+      --surface: #16161f;
+      --card:    #1c1c2b;
+      --border:  #2a2a3d;
+      --accent:  #7c6aff;
+      --accent2: #ff6a9a;
+      --green:   #2affa8;
+      --text:    #e8e8f0;
+      --muted:   #6b6b8a;
+      --radius:  14px;
     }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Segoe UI', sans-serif;
-      margin: 0;
-      padding: 30px;
-      background-color: var(--bg-light);
-      color: var(--text-light);
-      transition: var(--transition);
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 40px 20px 60px;
     }
 
-    .dark-mode {
-      background-color: var(--bg-dark);
-      color: var(--text-dark);
+    /* ── Grid background ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(124,106,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124,106,255,.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
     }
 
-    .container {
-      max-width: 800px;
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 780px;
       margin: auto;
-      background: white;
-      padding: 30px;
-      border-radius: var(--card-radius);
-      box-shadow: 0 0 20px rgba(0,0,0,0.1);
-      transition: var(--transition);
     }
 
-    .dark-mode .container {
-      background: #2b2b40;
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+    header .badge {
+      display: inline-block;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 100px;
+      padding: 4px 14px;
+      margin-bottom: 14px;
+    }
+    header h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: clamp(26px, 5vw, 42px);
+      font-weight: 700;
+      background: linear-gradient(135deg, #fff 30%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
+    }
+    header p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    /* ── Input card ── */
+    .input-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
     }
 
     textarea {
       width: 100%;
-      height: 150px;
-      padding: 10px;
-      font-size: 16px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
+      height: 140px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
       resize: vertical;
+      outline: none;
+      transition: border-color .2s;
+    }
+    textarea:focus { border-color: var(--accent); }
+    textarea::placeholder { color: var(--muted); }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
     }
 
     button {
+      display: flex;
+      align-items: center;
+      gap: 7px;
       padding: 10px 20px;
       border: none;
-      font-size: 16px;
       border-radius: 8px;
-      margin: 10px 5px 20px 0;
-      cursor: pointer;
-      transition: var(--transition);
-    }
-
-    .detect-btn { background: var(--primary); color: white; }
-    .dark-toggle { background: #444; color: white; }
-    .mic-btn { background: #17a2b8; color: white; }
-
-    #result, #summary, #history {
-      margin-top: 20px;
-      padding: 15px;
-      border-radius: var(--card-radius);
-      background: #e8f5e9;
-      transition: var(--transition);
-    }
-
-    .dark-mode #result, .dark-mode #summary, .dark-mode #history {
-      background: #334;
-    }
-
-    .flag {
-      width: 32px;
-      vertical-align: middle;
-      margin-right: 8px;
-    }
-
-    .keyword-cloud span {
+      font-family: 'DM Sans', sans-serif;
       font-size: 14px;
-      background: #d1ecf1;
-      margin: 4px;
-      padding: 5px 10px;
-      border-radius: 20px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .15s, opacity .15s;
+    }
+    button:hover  { opacity: .85; transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+
+    .btn-detect { background: var(--accent);  color: #fff; }
+    .btn-mic    { background: var(--accent2); color: #fff; }
+    .btn-clear  { background: var(--border);  color: var(--text); }
+
+    .char-count {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 6px;
+    }
+
+    /* ── Spinner ── */
+    #spinner {
+      display: none;
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 1px;
+    }
+    .dot-anim { animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%,100% { opacity: .3; } 50% { opacity: 1; }
+    }
+
+    /* ── Result card ── */
+    .result-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+      display: none;
+      animation: slideUp .35s ease;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .lang-result {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .lang-flag {
+      width: 48px;
+      height: 36px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+    }
+    .lang-name {
+      font-family: 'Space Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .confidence-pill {
       display: inline-block;
+      background: rgba(42,255,168,.12);
+      color: var(--green);
+      border: 1px solid rgba(42,255,168,.3);
+      border-radius: 100px;
+      padding: 3px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: 'Space Mono', monospace;
     }
 
-    canvas { max-width: 100%; margin-top: 20px; }
-
-    h2 {
-      animation: fadeIn 1s ease-in-out;
+    /* Stats row */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .stat-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-box .val {
+      font-family: 'Space Mono', monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .stat-box .lbl {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(-10px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* Keywords */
+    .kw-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .kw-cloud { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 20px; }
+    .kw-chip {
+      background: rgba(124,106,255,.12);
+      color: var(--accent);
+      border: 1px solid rgba(124,106,255,.25);
+      border-radius: 100px;
+      padding: 4px 12px;
+      font-size: 13px;
+    }
+
+    /* Chart */
+    .chart-wrap { position: relative; height: 200px; }
+
+    /* ── History ── */
+    .history-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: none;
+    }
+    .history-card h3 {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .hi-text { font-size: 13px; color: var(--muted); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .hi-lang { font-family: 'Space Mono', monospace; font-size: 13px; color: var(--green); white-space: nowrap; }
+
+    /* ── Error ── */
+    .error-box {
+      background: rgba(255,106,154,.08);
+      border: 1px solid rgba(255,106,154,.3);
+      color: var(--accent2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 14px;
+      display: none;
+      margin-bottom: 16px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>🌐 Ultimate Language Detector</h2>
-    <textarea id="inputText" placeholder="Type or speak here..."></textarea>
-    <br>
-    <button class="detect-btn" onclick="detectLanguage()">Detect</button>
-    <button class="mic-btn" onclick="startVoiceInput()">🎤 Speak</button>
-    <button class="dark-toggle" onclick="toggleDarkMode()">🌓 Toggle Dark Mode</button>
+<div class="wrapper">
 
-    <div id="result" style="display:none"></div>
-    <div id="summary"></div>
-    <div class="keyword-cloud" id="keywords"></div>
-    <canvas id="probChart"></canvas>
-    <div id="history"></div>
+  <!-- Header -->
+  <header>
+    <div class="badge">AI · NLP · Deep Learning</div>
+    <h1>Language Detector</h1>
+    <p>CNN + LSTM model trained on multilingual text</p>
+  </header>
+
+  <!-- Input -->
+  <div class="input-card">
+    <textarea id="inputText" placeholder="Type or paste text in any language…"></textarea>
+    <div class="char-count"><span id="charCount">0</span> characters</div>
+    <div class="btn-row">
+      <button class="btn-detect" onclick="detectLanguage()">
+        ⚡ Detect Language
+      </button>
+      <button class="btn-mic" onclick="startVoiceInput()">
+        🎤 Speak
+      </button>
+      <button class="btn-clear" onclick="clearAll()">
+        ✕ Clear
+      </button>
+    </div>
   </div>
 
-  <script>
-    let history = []
+  <!-- Spinner -->
+  <div id="spinner">
+    <span class="dot-anim">Analyzing</span> ···
+  </div>
 
-    function updateHistory(data, input) {
-      history.unshift({ text: input, ...data });
-      const container = document.getElementById('history');
-      container.innerHTML = '<h4>🧾 Prediction History</h4>' +
-        history.map(h => `<p><b>${h.language}</b> (${(h.confidence*100).toFixed(1)}%)<br><small>${h.text}</small></p>`).join('');
+  <!-- Error -->
+  <div class="error-box" id="errorBox"></div>
+
+  <!-- Result -->
+  <div class="result-card" id="resultCard">
+    <div class="lang-result">
+      <img class="lang-flag" id="flagImg" src="" alt="" onerror="this.style.display='none'" />
+      <div>
+        <div class="lang-name" id="langName"></div>
+        <span class="confidence-pill" id="confPill"></span>
+      </div>
+    </div>
+
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="kw-label">Top Keywords</div>
+    <div class="kw-cloud" id="kwCloud"></div>
+
+    <div class="chart-wrap">
+      <canvas id="probChart"></canvas>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="history-card" id="historyCard">
+    <h3>📋 Recent Detections</h3>
+    <div id="historyList"></div>
+  </div>
+
+</div>
+
+<script>
+  let chartInstance = null;
+  let detectionHistory = [];
+  let debounceTimer;
+
+  // ── Char counter ────────────────────────────────────────────────
+  document.getElementById('inputText').addEventListener('input', () => {
+    const len = document.getElementById('inputText').value.length;
+    document.getElementById('charCount').textContent = len;
+    clearTimeout(debounceTimer);
+    if (len > 15) {
+      debounceTimer = setTimeout(detectLanguage, 1200);
     }
+  });
 
-    async function detectLanguage() {
-      const text = document.getElementById('inputText').value.trim();
-      if (!text) return;
+  // ── Main detect ─────────────────────────────────────────────────
+  async function detectLanguage() {
+    const text = document.getElementById('inputText').value.trim();
+    if (!text) return;
 
-      const resultDiv = document.getElementById('result');
-      resultDiv.style.display = 'none';
-      const res = await fetch('/detect', {
-        method: 'POST',
+    showSpinner(true);
+    hideError();
+    document.getElementById('resultCard').style.display = 'none';
+
+    try {
+      const res  = await fetch('/detect', {
+        method : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body   : JSON.stringify({ text })
       });
       const data = await res.json();
 
-      if (data.error) {
-        resultDiv.innerText = data.error;
-        resultDiv.style.display = 'block';
-        return;
-      }
+      showSpinner(false);
 
-      const flagURL = `https://flagcdn.com/48x36/${data.language.slice(0, 2).toLowerCase()}.png`;
+      if (data.error) { showError(data.error); return; }
 
-      resultDiv.innerHTML = `<h3><img class="flag" src="${flagURL}" onerror="this.style.display='none'"> ${data.language} (${(data.confidence*100).toFixed(2)}%)</h3>`;
-      resultDiv.style.display = 'block';
-
-      document.getElementById('summary').innerHTML =
-        `<p><strong>📌 Word Count:</strong> ${data.word_count} | <strong>Characters:</strong> ${data.char_count}<br>
-         <strong>🆎 Unique Words:</strong> ${data.unique_words} | <strong>❗Special Chars:</strong> ${data.special_chars}</p>`;
-
-      document.getElementById('keywords').innerHTML =
-        `<h4>🔥 Top Keywords</h4>` + data.keywords.map(k => `<span>${k}</span>`).join(' ');
-
-      renderChart(data.probabilities);
-      updateHistory(data, text);
+      renderResult(data, text);
+    } catch (err) {
+      showSpinner(false);
+      showError('Network error — is the server running?');
     }
+  }
 
-    function renderChart(probabilities) {
-      const ctx = document.getElementById('probChart');
-      const labels = [...Array(probabilities.length).keys()].map(i => 'Lang ' + (i+1));
-      const data = probabilities;
+  // ── Render result ───────────────────────────────────────────────
+  function renderResult(data, inputText) {
+    // Flag
+    const code = data.language.slice(0, 2).toLowerCase();
+    const flag = document.getElementById('flagImg');
+    flag.src = `https://flagcdn.com/48x36/${code}.png`;
+    flag.style.display = 'block';
 
-      if (window.probChart) window.probChart.destroy();
+    document.getElementById('langName').textContent = data.language;
+    document.getElementById('confPill').textContent =
+      (data.confidence * 100).toFixed(1) + '% confidence';
 
-      window.probChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Language Confidence %',
-            data: data.map(p => p * 100),
-            backgroundColor: 'rgba(0, 123, 255, 0.6)',
-          }]
-        },
-        options: {
-          responsive: true,
-          scales: { y: { beginAtZero: true } },
+    // Stats
+    document.getElementById('statsGrid').innerHTML = [
+      { val: data.word_count,    lbl: 'Words'        },
+      { val: data.char_count,    lbl: 'Characters'   },
+      { val: data.unique_words,  lbl: 'Unique Words'  },
+      { val: data.special_chars, lbl: 'Special Chars' },
+    ].map(s =>
+      `<div class="stat-box"><div class="val">${s.val}</div><div class="lbl">${s.lbl}</div></div>`
+    ).join('');
+
+    // Keywords
+    document.getElementById('kwCloud').innerHTML =
+      data.keywords.length
+        ? data.keywords.map(k => `<span class="kw-chip">${k}</span>`).join('')
+        : '<span style="color:var(--muted);font-size:13px">No keywords extracted</span>';
+
+    // Chart — show top-N languages by probability
+    renderChart(data.probabilities, data.all_languages);
+
+    document.getElementById('resultCard').style.display = 'block';
+
+    // History
+    addHistory(data, inputText);
+  }
+
+  // ── Chart ───────────────────────────────────────────────────────
+  function renderChart(probs, labels) {
+    // Show only top 10 by probability for readability
+    const paired = probs.map((p, i) => ({ p, l: labels ? labels[i] : 'Lang ' + (i+1) }));
+    paired.sort((a, b) => b.p - a.p);
+    const top = paired.slice(0, 10);
+
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(document.getElementById('probChart'), {
+      type: 'bar',
+      data: {
+        labels  : top.map(x => x.l),
+        datasets: [{
+          label          : 'Confidence %',
+          data           : top.map(x => +(x.p * 100).toFixed(2)),
+          backgroundColor: top.map((_, i) =>
+            i === 0 ? 'rgba(124,106,255,.8)' : 'rgba(124,106,255,.2)'),
+          borderColor    : 'rgba(124,106,255,.9)',
+          borderWidth    : 1,
+          borderRadius   : 4,
+        }]
+      },
+      options: {
+        responsive         : true,
+        maintainAspectRatio: false,
+        plugins : { legend: { display: false } },
+        scales  : {
+          x: { ticks: { color: '#6b6b8a', font: { size: 11 } },
+               grid : { color: 'rgba(255,255,255,.04)' } },
+          y: { beginAtZero: true,
+               ticks: { color: '#6b6b8a', font: { size: 11 },
+                        callback: v => v + '%' },
+               grid : { color: 'rgba(255,255,255,.04)' } }
         }
-      });
-    }
-
-    function toggleDarkMode() {
-      document.body.classList.toggle('dark-mode');
-    }
-
-    function startVoiceInput() {
-      const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-      recognition.lang = 'en-US';
-      recognition.start();
-
-      recognition.onresult = (e) => {
-        document.getElementById('inputText').value = e.results[0][0].transcript;
-        detectLanguage();
-      };
-    }
-
-    // Auto detect with debounce
-    let timeout;
-    document.getElementById('inputText').addEventListener('input', () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => detectLanguage(), 1200);
+      }
     });
-  </script>
+  }
+
+  // ── History ─────────────────────────────────────────────────────
+  function addHistory(data, text) {
+    detectionHistory.unshift({ lang: data.language, conf: data.confidence, text });
+    if (detectionHistory.length > 8) detectionHistory.pop();
+
+    const card = document.getElementById('historyCard');
+    card.style.display = 'block';
+    document.getElementById('historyList').innerHTML =
+      detectionHistory.map(h =>
+        `<div class="history-item">
+           <span class="hi-text">${escHtml(h.text)}</span>
+           <span class="hi-lang">${h.lang} · ${(h.conf*100).toFixed(0)}%</span>
+         </div>`
+      ).join('');
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+  function clearAll() {
+    document.getElementById('inputText').value = '';
+    document.getElementById('charCount').textContent = '0';
+    document.getElementById('resultCard').style.display = 'none';
+    hideError();
+  }
+
+  function showSpinner(on) {
+    document.getElementById('spinner').style.display = on ? 'block' : 'none';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorBox');
+    el.textContent = '⚠ ' + msg;
+    el.style.display = 'block';
+  }
+
+  function hideError() {
+    document.getElementById('errorBox').style.display = 'none';
+  }
+
+  function escHtml(str) {
+    return str.replace(/[&<>"']/g, m =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  }
+
+  // ── Voice input ─────────────────────────────────────────────────
+  function startVoiceInput() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showError('Voice input not supported in this browser.'); return; }
+
+    const recognition = new SR();
+    recognition.lang  = 'en-US';
+    recognition.start();
+    recognition.onresult = e => {
+      document.getElementById('inputText').value = e.results[0][0].transcript;
+      detectLanguage();
+    };
+    recognition.onerror = () => showError('Microphone error. Please allow microphone access.');
+  }
+</script>
 </body>
 </html>
