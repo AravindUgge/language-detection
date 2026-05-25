@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -13,50 +13,39 @@ import nltk
 from nltk.corpus import stopwords
 import re
 import sys
+import os
+import pickle
+import subprocess
 
 app = Flask(__name__)
 
-# Constants
-CSV_PATH = "Language Detection.csv"
-MAX_WORDS = 10000
-MAX_LEN = 150
+# ── Constants ────────────────────────────────────────────────────────────────
+CSV_PATH      = "Language Detection.csv"
+MODEL_PATH    = "lang_model.keras"
+TOKENIZER_PATH= "tokenizer.pkl"
+ENCODER_PATH  = "label_encoder.pkl"
+MAX_WORDS     = 10000
+MAX_LEN       = 150
 EMBEDDING_DIM = 128
 
-# Download NLTK stopwords
-nltk.download('stopwords')
+# ── NLTK stopwords ───────────────────────────────────────────────────────────
+nltk.download('stopwords', quiet=True)
 stop_words = set(stopwords.words('english'))
 
-# Load spaCy model
+# ── spaCy model (auto-download if missing) ───────────────────────────────────
 try:
     nlp_en = spacy.load('en_core_web_sm')
 except OSError:
-    print("Run 'python -m spacy download en_core_web_sm'")
-    sys.exit(1)
+    print("Downloading spaCy model en_core_web_sm ...")
+    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
+                   check=True)
+    nlp_en = spacy.load('en_core_web_sm')
 
-# Load and preprocess dataset
-df = pd.read_csv(CSV_PATH)
-df.dropna(inplace=True)
-df['Text'] = df['Text'].astype(str)
-
-label_encoder = LabelEncoder()
-df['label'] = label_encoder.fit_transform(df['Language'])
-LANGUAGES = list(label_encoder.classes_)
-NUM_CLASSES = len(LANGUAGES)
-
+# ── Helper ────────────────────────────────────────────────────────────────────
 def clean_text(text):
     return re.sub(r'[^\w\s]', '', text.lower().strip())
 
-df['clean_text'] = df['Text'].apply(clean_text)
-
-tokenizer = Tokenizer(num_words=MAX_WORDS)
-tokenizer.fit_on_texts(df['clean_text'])
-sequences = tokenizer.texts_to_sequences(df['clean_text'])
-X = pad_sequences(sequences, maxlen=MAX_LEN)
-y = tf.keras.utils.to_categorical(df['label'], NUM_CLASSES)
-
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-
-def create_model():
+def create_model(num_classes):
     model = Sequential([
         Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
         Conv1D(128, 5, activation='relu', padding='same'),
@@ -68,52 +57,116 @@ def create_model():
         Flatten(),
         Dense(128, activation='relu'),
         Dropout(0.3),
-        Dense(NUM_CLASSES, activation='softmax')
+        Dense(num_classes, activation='softmax')
     ])
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
     return model
 
-model = create_model()
-model.fit(X_train, y_train, epochs=5, batch_size=32, validation_data=(X_val, y_val), verbose=1)
+# ── Load or train model ───────────────────────────────────────────────────────
+if (os.path.exists(MODEL_PATH) and
+        os.path.exists(TOKENIZER_PATH) and
+        os.path.exists(ENCODER_PATH)):
 
+    print("✅ Loading saved model and artifacts ...")
+    model = tf.keras.models.load_model(MODEL_PATH)
+
+    with open(TOKENIZER_PATH, 'rb') as f:
+        tokenizer = pickle.load(f)
+    with open(ENCODER_PATH, 'rb') as f:
+        label_encoder = pickle.load(f)
+
+    LANGUAGES   = list(label_encoder.classes_)
+    NUM_CLASSES = len(LANGUAGES)
+
+else:
+    print("🔄 No saved model found — training from scratch ...")
+
+    df = pd.read_csv(CSV_PATH)
+    df.dropna(inplace=True)
+    df['Text'] = df['Text'].astype(str)
+
+    label_encoder = LabelEncoder()
+    df['label']   = label_encoder.fit_transform(df['Language'])
+    LANGUAGES     = list(label_encoder.classes_)
+    NUM_CLASSES   = len(LANGUAGES)
+
+    df['clean_text'] = df['Text'].apply(clean_text)
+
+    tokenizer = Tokenizer(num_words=MAX_WORDS)
+    tokenizer.fit_on_texts(df['clean_text'])
+
+    sequences = tokenizer.texts_to_sequences(df['clean_text'])
+    X = pad_sequences(sequences, maxlen=MAX_LEN)
+    y = tf.keras.utils.to_categorical(df['label'], NUM_CLASSES)
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.2, random_state=42)
+
+    model = create_model(NUM_CLASSES)
+    model.fit(X_train, y_train,
+              epochs=5, batch_size=32,
+              validation_data=(X_val, y_val),
+              verbose=1)
+
+    # Save everything so future restarts skip training
+    model.save(MODEL_PATH)
+    with open(TOKENIZER_PATH, 'wb') as f:
+        pickle.dump(tokenizer, f)
+    with open(ENCODER_PATH, 'wb') as f:
+        pickle.dump(label_encoder, f)
+
+    print("✅ Model saved.")
+
+# ── Inference helpers ─────────────────────────────────────────────────────────
 def preprocess_text(text):
     text = clean_text(text)
     if not text:
         return None, 0, 0, 0, 0, []
 
-    doc = nlp_en(text)
-    words = [token.text for token in doc if not token.is_punct]
-    unique_words = len(set(words))
-    char_count = len(text)
+    doc         = nlp_en(text)
+    words       = [token.text for token in doc if not token.is_punct]
+    unique_words= len(set(words))
+    char_count  = len(text)
     special_chars = len(re.findall(r'[^a-zA-Z0-9\s]', text))
-    keywords = [token.text for token in doc if not token.is_stop and not token.is_punct and len(token.text) > 1]
+    keywords    = [token.text for token in doc
+                   if not token.is_stop and not token.is_punct
+                   and len(token.text) > 1]
 
-    seq = tokenizer.texts_to_sequences([text])
+    seq    = tokenizer.texts_to_sequences([text])
     padded = pad_sequences(seq, maxlen=MAX_LEN)
 
     return padded, len(words), char_count, unique_words, special_chars, keywords[:5]
 
+
 def detect_language(text):
-    padded, word_count, char_count, unique_words, special_chars, keywords = preprocess_text(text)
+    padded, word_count, char_count, unique_words, special_chars, keywords = \
+        preprocess_text(text)
+
     if padded is None:
         return {'error': 'Empty text after preprocessing'}
 
     prediction = model.predict(padded, verbose=0)[0]
-    idx = int(np.argmax(prediction))
+    idx        = int(np.argmax(prediction))
+
     return {
-        'language': LANGUAGES[idx],
-        'confidence': float(prediction[idx]),
-        'word_count': word_count,
-        'char_count': char_count,
-        'unique_words': unique_words,
+        'language'     : LANGUAGES[idx],
+        'confidence'   : float(prediction[idx]),
+        'word_count'   : word_count,
+        'char_count'   : char_count,
+        'unique_words' : unique_words,
         'special_chars': special_chars,
-        'keywords': keywords,
-        'probabilities': [float(p) for p in prediction]
+        'keywords'     : keywords,
+        'probabilities': [float(p) for p in prediction],
+        'all_languages': LANGUAGES,
     }
 
+# ── Routes ────────────────────────────────────────────────────────────────────
 @app.route('/')
 def index():
-    return render_template_string(open("index.html", encoding="utf-8").read())
+    return render_template('index.html')   # ← uses templates/index.html
+
 
 @app.route('/detect', methods=['POST'])
 def detect():
@@ -127,9 +180,10 @@ def detect():
         if 'error' in result:
             return jsonify(result), 400
         return jsonify(result)
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 if __name__ == '__main__':
     app.run(debug=True)
-
