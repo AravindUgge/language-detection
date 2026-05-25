@@ -30,7 +30,6 @@
       padding: 40px 20px 60px;
     }
 
-    /* ── Grid background ── */
     body::before {
       content: '';
       position: fixed;
@@ -50,7 +49,6 @@
       margin: auto;
     }
 
-    /* ── Header ── */
     header {
       text-align: center;
       margin-bottom: 36px;
@@ -83,7 +81,6 @@
       font-size: 15px;
     }
 
-    /* ── Input card ── */
     .input-card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -109,6 +106,13 @@
     textarea:focus { border-color: var(--accent); }
     textarea::placeholder { color: var(--muted); }
 
+    .char-count {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 6px;
+    }
+
     .btn-row {
       display: flex;
       gap: 10px;
@@ -131,33 +135,21 @@
     }
     button:hover  { opacity: .85; transform: translateY(-1px); }
     button:active { transform: translateY(0); }
-
     .btn-detect { background: var(--accent);  color: #fff; }
     .btn-mic    { background: var(--accent2); color: #fff; }
     .btn-clear  { background: var(--border);  color: var(--text); }
 
-    .char-count {
-      font-size: 12px;
-      color: var(--muted);
-      text-align: right;
-      margin-top: 6px;
-    }
-
-    /* ── Spinner ── */
     #spinner {
       display: none;
       text-align: center;
       padding: 20px;
       color: var(--muted);
       font-size: 13px;
-      letter-spacing: 1px;
+      letter-spacing: 2px;
     }
     .dot-anim { animation: pulse 1s infinite; }
-    @keyframes pulse {
-      0%,100% { opacity: .3; } 50% { opacity: 1; }
-    }
+    @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
 
-    /* ── Result card ── */
     .result-card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -168,8 +160,8 @@
       animation: slideUp .35s ease;
     }
     @keyframes slideUp {
-      from { opacity: 0; transform: translateY(12px); }
-      to   { opacity: 1; transform: translateY(0); }
+      from { opacity:0; transform:translateY(12px); }
+      to   { opacity:1; transform:translateY(0); }
     }
 
     .lang-result {
@@ -202,7 +194,6 @@
       font-family: 'Space Mono', monospace;
     }
 
-    /* Stats row */
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -230,7 +221,6 @@
       letter-spacing: 1px;
     }
 
-    /* Keywords */
     .kw-label {
       font-size: 11px;
       text-transform: uppercase;
@@ -248,10 +238,8 @@
       font-size: 13px;
     }
 
-    /* Chart */
     .chart-wrap { position: relative; height: 200px; }
 
-    /* ── History ── */
     .history-card {
       background: var(--card);
       border: 1px solid var(--border);
@@ -279,7 +267,6 @@
     .hi-text { font-size: 13px; color: var(--muted); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .hi-lang { font-family: 'Space Mono', monospace; font-size: 13px; color: var(--green); white-space: nowrap; }
 
-    /* ── Error ── */
     .error-box {
       background: rgba(255,106,154,.08);
       border: 1px solid rgba(255,106,154,.3);
@@ -295,39 +282,25 @@
 <body>
 <div class="wrapper">
 
-  <!-- Header -->
   <header>
     <div class="badge">AI · NLP · Deep Learning</div>
     <h1>Language Detector</h1>
     <p>CNN + LSTM model trained on multilingual text</p>
   </header>
 
-  <!-- Input -->
   <div class="input-card">
     <textarea id="inputText" placeholder="Type or paste text in any language…"></textarea>
     <div class="char-count"><span id="charCount">0</span> characters</div>
     <div class="btn-row">
-      <button class="btn-detect" onclick="detectLanguage()">
-        ⚡ Detect Language
-      </button>
-      <button class="btn-mic" onclick="startVoiceInput()">
-        🎤 Speak
-      </button>
-      <button class="btn-clear" onclick="clearAll()">
-        ✕ Clear
-      </button>
+      <button class="btn-detect" onclick="detectLanguage()">⚡ Detect Language</button>
+      <button class="btn-mic"    onclick="startVoiceInput()">🎤 Speak</button>
+      <button class="btn-clear"  onclick="clearAll()">✕ Clear</button>
     </div>
   </div>
 
-  <!-- Spinner -->
-  <div id="spinner">
-    <span class="dot-anim">Analyzing</span> ···
-  </div>
-
-  <!-- Error -->
+  <div id="spinner"><span class="dot-anim">Analyzing</span> ···</div>
   <div class="error-box" id="errorBox"></div>
 
-  <!-- Result -->
   <div class="result-card" id="resultCard">
     <div class="lang-result">
       <img class="lang-flag" id="flagImg" src="" alt="" onerror="this.style.display='none'" />
@@ -336,49 +309,36 @@
         <span class="confidence-pill" id="confPill"></span>
       </div>
     </div>
-
-    <div class="stats-grid" id="statsGrid"></div>
-
+    <div class="stats-grid"  id="statsGrid"></div>
     <div class="kw-label">Top Keywords</div>
-    <div class="kw-cloud" id="kwCloud"></div>
-
-    <div class="chart-wrap">
-      <canvas id="probChart"></canvas>
-    </div>
+    <div class="kw-cloud"    id="kwCloud"></div>
+    <div class="chart-wrap"><canvas id="probChart"></canvas></div>
   </div>
 
-  <!-- History -->
   <div class="history-card" id="historyCard">
     <h3>📋 Recent Detections</h3>
     <div id="historyList"></div>
   </div>
 
 </div>
-
 <script>
   let chartInstance = null;
   let detectionHistory = [];
   let debounceTimer;
 
-  // ── Char counter ────────────────────────────────────────────────
   document.getElementById('inputText').addEventListener('input', () => {
     const len = document.getElementById('inputText').value.length;
     document.getElementById('charCount').textContent = len;
     clearTimeout(debounceTimer);
-    if (len > 15) {
-      debounceTimer = setTimeout(detectLanguage, 1200);
-    }
+    if (len > 15) debounceTimer = setTimeout(detectLanguage, 1200);
   });
 
-  // ── Main detect ─────────────────────────────────────────────────
   async function detectLanguage() {
     const text = document.getElementById('inputText').value.trim();
     if (!text) return;
-
     showSpinner(true);
     hideError();
     document.getElementById('resultCard').style.display = 'none';
-
     try {
       const res  = await fetch('/detect', {
         method : 'POST',
@@ -386,11 +346,8 @@
         body   : JSON.stringify({ text })
       });
       const data = await res.json();
-
       showSpinner(false);
-
       if (data.error) { showError(data.error); return; }
-
       renderResult(data, text);
     } catch (err) {
       showSpinner(false);
@@ -398,52 +355,37 @@
     }
   }
 
-  // ── Render result ───────────────────────────────────────────────
   function renderResult(data, inputText) {
-    // Flag
     const code = data.language.slice(0, 2).toLowerCase();
     const flag = document.getElementById('flagImg');
     flag.src = `https://flagcdn.com/48x36/${code}.png`;
     flag.style.display = 'block';
 
-    document.getElementById('langName').textContent = data.language;
-    document.getElementById('confPill').textContent =
-      (data.confidence * 100).toFixed(1) + '% confidence';
+    document.getElementById('langName').textContent  = data.language;
+    document.getElementById('confPill').textContent  = (data.confidence * 100).toFixed(1) + '% confidence';
 
-    // Stats
     document.getElementById('statsGrid').innerHTML = [
       { val: data.word_count,    lbl: 'Words'        },
       { val: data.char_count,    lbl: 'Characters'   },
       { val: data.unique_words,  lbl: 'Unique Words'  },
       { val: data.special_chars, lbl: 'Special Chars' },
-    ].map(s =>
-      `<div class="stat-box"><div class="val">${s.val}</div><div class="lbl">${s.lbl}</div></div>`
-    ).join('');
+    ].map(s => `<div class="stat-box"><div class="val">${s.val}</div><div class="lbl">${s.lbl}</div></div>`).join('');
 
-    // Keywords
     document.getElementById('kwCloud').innerHTML =
       data.keywords.length
         ? data.keywords.map(k => `<span class="kw-chip">${k}</span>`).join('')
         : '<span style="color:var(--muted);font-size:13px">No keywords extracted</span>';
 
-    // Chart — show top-N languages by probability
     renderChart(data.probabilities, data.all_languages);
-
     document.getElementById('resultCard').style.display = 'block';
-
-    // History
     addHistory(data, inputText);
   }
 
-  // ── Chart ───────────────────────────────────────────────────────
   function renderChart(probs, labels) {
-    // Show only top 10 by probability for readability
-    const paired = probs.map((p, i) => ({ p, l: labels ? labels[i] : 'Lang ' + (i+1) }));
+    const paired = probs.map((p, i) => ({ p, l: labels ? labels[i] : 'Lang'+(i+1) }));
     paired.sort((a, b) => b.p - a.p);
     const top = paired.slice(0, 10);
-
     if (chartInstance) chartInstance.destroy();
-
     chartInstance = new Chart(document.getElementById('probChart'), {
       type: 'bar',
       data: {
@@ -451,34 +393,26 @@
         datasets: [{
           label          : 'Confidence %',
           data           : top.map(x => +(x.p * 100).toFixed(2)),
-          backgroundColor: top.map((_, i) =>
-            i === 0 ? 'rgba(124,106,255,.8)' : 'rgba(124,106,255,.2)'),
+          backgroundColor: top.map((_, i) => i === 0 ? 'rgba(124,106,255,.8)' : 'rgba(124,106,255,.2)'),
           borderColor    : 'rgba(124,106,255,.9)',
           borderWidth    : 1,
           borderRadius   : 4,
         }]
       },
       options: {
-        responsive         : true,
-        maintainAspectRatio: false,
-        plugins : { legend: { display: false } },
-        scales  : {
-          x: { ticks: { color: '#6b6b8a', font: { size: 11 } },
-               grid : { color: 'rgba(255,255,255,.04)' } },
-          y: { beginAtZero: true,
-               ticks: { color: '#6b6b8a', font: { size: 11 },
-                        callback: v => v + '%' },
-               grid : { color: 'rgba(255,255,255,.04)' } }
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color:'#6b6b8a', font:{size:11} }, grid: { color:'rgba(255,255,255,.04)' } },
+          y: { beginAtZero:true, ticks: { color:'#6b6b8a', font:{size:11}, callback: v => v+'%' }, grid: { color:'rgba(255,255,255,.04)' } }
         }
       }
     });
   }
 
-  // ── History ─────────────────────────────────────────────────────
   function addHistory(data, text) {
     detectionHistory.unshift({ lang: data.language, conf: data.confidence, text });
     if (detectionHistory.length > 8) detectionHistory.pop();
-
     const card = document.getElementById('historyCard');
     card.style.display = 'block';
     document.getElementById('historyList').innerHTML =
@@ -490,46 +424,25 @@
       ).join('');
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────
   function clearAll() {
     document.getElementById('inputText').value = '';
     document.getElementById('charCount').textContent = '0';
     document.getElementById('resultCard').style.display = 'none';
     hideError();
   }
+  function showSpinner(on) { document.getElementById('spinner').style.display = on ? 'block' : 'none'; }
+  function showError(msg)  { const el = document.getElementById('errorBox'); el.textContent = '⚠ '+msg; el.style.display = 'block'; }
+  function hideError()     { document.getElementById('errorBox').style.display = 'none'; }
+  function escHtml(str)    { return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-  function showSpinner(on) {
-    document.getElementById('spinner').style.display = on ? 'block' : 'none';
-  }
-
-  function showError(msg) {
-    const el = document.getElementById('errorBox');
-    el.textContent = '⚠ ' + msg;
-    el.style.display = 'block';
-  }
-
-  function hideError() {
-    document.getElementById('errorBox').style.display = 'none';
-  }
-
-  function escHtml(str) {
-    return str.replace(/[&<>"']/g, m =>
-      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
-  }
-
-  // ── Voice input ─────────────────────────────────────────────────
   function startVoiceInput() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { showError('Voice input not supported in this browser.'); return; }
-
-    const recognition = new SR();
-    recognition.lang  = 'en-US';
-    recognition.start();
-    recognition.onresult = e => {
-      document.getElementById('inputText').value = e.results[0][0].transcript;
-      detectLanguage();
-    };
-    recognition.onerror = () => showError('Microphone error. Please allow microphone access.');
+    const r = new SR();
+    r.lang = 'en-US';
+    r.start();
+    r.onresult = e => { document.getElementById('inputText').value = e.results[0][0].transcript; detectLanguage(); };
+    r.onerror  = () => showError('Microphone error. Please allow microphone access.');
   }
 </script>
 </body>
