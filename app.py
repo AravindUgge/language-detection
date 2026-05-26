@@ -1,44 +1,37 @@
 """
-Language Detector — Render-ready single file
+Language Detector — Python 3.14 compatible, Render-ready single file
+Uses PyTorch (has 3.14 wheels) instead of TensorFlow (no 3.14 wheels).
 © 2024 Aravind Ugge. All rights reserved.
 
 Deploy to Render:
   Build command : pip install -r requirements.txt
   Start command : python app.py
-  Environment   : (none needed — everything is auto-detected)
 """
 
-import os, re, csv, pickle, subprocess, sys
+import os, re, csv, pickle, subprocess, sys, json
 
-# ── Auto-install gunicorn and boot it when running on Render ─────────────────
-# Render sets the PORT env var. When present we launch ourselves under gunicorn
-# so the process is production-grade without a separate Procfile or render.yaml.
+# ── Auto-boot under gunicorn on Render ────────────────────────────────────────
 _PORT = os.environ.get("PORT")
 if _PORT and "gunicorn" not in sys.argv[0]:
     try:
-        import gunicorn  # noqa: F401
+        import gunicorn  # noqa
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "gunicorn", "-q"])
-    os.execv(
-        sys.executable,
-        [sys.executable, "-m", "gunicorn",
-         "app:app",
-         "--bind", f"0.0.0.0:{_PORT}",
-         "--workers", "1",
-         "--timeout", "120"]
-    )
+    os.execv(sys.executable, [
+        sys.executable, "-m", "gunicorn", "app:app",
+        "--bind", f"0.0.0.0:{_PORT}",
+        "--workers", "1", "--timeout", "180"
+    ])
 
-# ── Normal imports (after gunicorn re-exec guard) ─────────────────────────────
+# ── Imports ───────────────────────────────────────────────────────────────────
+import math, random
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 import nltk
 from nltk.corpus import stopwords
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import (
-    Conv1D, MaxPooling1D, Dense, Flatten, Embedding, Dropout, LSTM
-)
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from flask import Flask, request, jsonify, render_template_string
@@ -49,12 +42,13 @@ app = Flask(__name__)
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH       = os.path.join(BASE_DIR, "Language Detection.csv")
 _CACHE         = os.environ.get("MODEL_CACHE_DIR", "/tmp")
-MODEL_PATH     = os.path.join(_CACHE, "lang_model.keras")
-TOKENIZER_PATH = os.path.join(_CACHE, "tokenizer.pkl")
+MODEL_PATH     = os.path.join(_CACHE, "lang_model.pt")
+VOCAB_PATH     = os.path.join(_CACHE, "vocab.pkl")
 ENCODER_PATH   = os.path.join(_CACHE, "label_encoder.pkl")
-MAX_WORDS      = 10000
+MAX_VOCAB      = 10000
 MAX_LEN        = 150
-EMBEDDING_DIM  = 128
+EMBED_DIM      = 128
+DEVICE         = torch.device("cpu")   # Render free tier has no GPU
 
 # ── NLTK ──────────────────────────────────────────────────────────────────────
 nltk.download("stopwords", quiet=True)
@@ -83,77 +77,149 @@ def load_csv(path):
                 texts.append(t); langs.append(l)
     return texts, langs
 
-# ── Model definition ──────────────────────────────────────────────────────────
-def create_model(num_classes):
-    m = Sequential([
-        Embedding(MAX_WORDS, EMBEDDING_DIM, input_length=MAX_LEN),
-        Conv1D(128, 5, activation="relu", padding="same"),
-        MaxPooling1D(2),
-        LSTM(64, return_sequences=True),
-        Dropout(0.3),
-        Conv1D(64, 3, activation="relu", padding="same"),
-        MaxPooling1D(2),
-        Flatten(),
-        Dense(128, activation="relu"),
-        Dropout(0.3),
-        Dense(num_classes, activation="softmax"),
-    ])
-    m.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
-    return m
+# ── Vocabulary ────────────────────────────────────────────────────────────────
+class Vocab:
+    PAD, UNK = 0, 1
+    def __init__(self):
+        self.w2i = {"<PAD>": 0, "<UNK>": 1}
+
+    def build(self, corpus, max_size=MAX_VOCAB):
+        from collections import Counter
+        counts = Counter(t for text in corpus for t in simple_tokenize(text))
+        for word, _ in counts.most_common(max_size - 2):
+            if word not in self.w2i:
+                self.w2i[word] = len(self.w2i)
+
+    def encode(self, text, max_len=MAX_LEN):
+        ids = [self.w2i.get(t, self.UNK) for t in simple_tokenize(clean_text(text))]
+        ids = ids[:max_len]
+        ids += [self.PAD] * (max_len - len(ids))
+        return ids
+
+    def __len__(self):
+        return len(self.w2i)
+
+# ── PyTorch CNN + LSTM model ──────────────────────────────────────────────────
+class LangDetector(nn.Module):
+    def __init__(self, vocab_size, embed_dim, num_classes):
+        super().__init__()
+        self.embed    = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.conv1    = nn.Conv1d(embed_dim, 128, kernel_size=5, padding=2)
+        self.pool1    = nn.MaxPool1d(2)
+        self.lstm     = nn.LSTM(128, 64, batch_first=True, bidirectional=False)
+        self.drop1    = nn.Dropout(0.3)
+        self.conv2    = nn.Conv1d(64, 64, kernel_size=3, padding=1)
+        self.pool2    = nn.AdaptiveMaxPool1d(1)
+        self.fc1      = nn.Linear(64, 128)
+        self.drop2    = nn.Dropout(0.3)
+        self.fc2      = nn.Linear(128, num_classes)
+
+    def forward(self, x):
+        x = self.embed(x).permute(0, 2, 1)   # (B, E, L)
+        x = torch.relu(self.conv1(x))
+        x = self.pool1(x)                     # (B, 128, L/2)
+        x = x.permute(0, 2, 1)               # (B, L/2, 128)
+        x, _ = self.lstm(x)                  # (B, L/2, 64)
+        x = self.drop1(x)
+        x = x.permute(0, 2, 1)               # (B, 64, L/2)
+        x = torch.relu(self.conv2(x))
+        x = self.pool2(x).squeeze(-1)        # (B, 64)
+        x = torch.relu(self.fc1(x))
+        x = self.drop2(x)
+        return self.fc2(x)                   # logits (B, C)
 
 # ── Load or train ─────────────────────────────────────────────────────────────
-if all(os.path.exists(p) for p in [MODEL_PATH, TOKENIZER_PATH, ENCODER_PATH]):
+if all(os.path.exists(p) for p in [MODEL_PATH, VOCAB_PATH, ENCODER_PATH]):
     print("✅ Loading saved model …")
-    model = tf.keras.models.load_model(MODEL_PATH)
-    with open(TOKENIZER_PATH, "rb") as f: tokenizer     = pickle.load(f)
-    with open(ENCODER_PATH,   "rb") as f: label_encoder = pickle.load(f)
+    with open(VOCAB_PATH,   "rb") as f: vocab         = pickle.load(f)
+    with open(ENCODER_PATH, "rb") as f: label_encoder = pickle.load(f)
+    NUM_CLASSES = len(label_encoder.classes_)
+    net = LangDetector(len(vocab), EMBED_DIM, NUM_CLASSES).to(DEVICE)
+    net.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE, weights_only=True))
+    net.eval()
 else:
     print("🔄 Training model from scratch …")
     raw_texts, raw_langs = load_csv(CSV_PATH)
-    label_encoder        = LabelEncoder()
-    labels               = label_encoder.fit_transform(raw_langs)
-    clean_texts          = [clean_text(t) for t in raw_texts]
-    tokenizer            = Tokenizer(num_words=MAX_WORDS)
-    tokenizer.fit_on_texts(clean_texts)
-    X = pad_sequences(tokenizer.texts_to_sequences(clean_texts), maxlen=MAX_LEN)
-    y = tf.keras.utils.to_categorical(labels, len(label_encoder.classes_))
+
+    label_encoder = LabelEncoder()
+    labels        = label_encoder.fit_transform(raw_langs)
+    NUM_CLASSES   = len(label_encoder.classes_)
+
+    vocab = Vocab()
+    vocab.build([clean_text(t) for t in raw_texts])
+
+    X = np.array([vocab.encode(t) for t in raw_texts], dtype=np.int64)
+    y = np.array(labels, dtype=np.int64)
+
     X_tr, X_v, y_tr, y_v = train_test_split(X, y, test_size=0.2, random_state=42)
-    model = create_model(len(label_encoder.classes_))
-    model.fit(X_tr, y_tr, epochs=5, batch_size=32, validation_data=(X_v, y_v), verbose=1)
+
+    tr_loader = DataLoader(TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr)),
+                           batch_size=64, shuffle=True)
+    v_loader  = DataLoader(TensorDataset(torch.from_numpy(X_v),  torch.from_numpy(y_v)),
+                           batch_size=64)
+
+    net       = LangDetector(len(vocab), EMBED_DIM, NUM_CLASSES).to(DEVICE)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(net.parameters(), lr=1e-3)
+
+    for epoch in range(5):
+        net.train()
+        total_loss = 0
+        for xb, yb in tr_loader:
+            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+            optimizer.zero_grad()
+            loss = criterion(net(xb), yb)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        net.eval()
+        correct = total = 0
+        with torch.no_grad():
+            for xb, yb in v_loader:
+                preds = net(xb.to(DEVICE)).argmax(1).cpu()
+                correct += (preds == yb).sum().item()
+                total   += len(yb)
+        print(f"  Epoch {epoch+1}/5 — loss {total_loss/len(tr_loader):.4f} "
+              f"— val acc {correct/total:.4f}")
+
     os.makedirs(_CACHE, exist_ok=True)
-    model.save(MODEL_PATH)
-    with open(TOKENIZER_PATH, "wb") as f: pickle.dump(tokenizer,     f)
-    with open(ENCODER_PATH,   "wb") as f: pickle.dump(label_encoder, f)
+    torch.save(net.state_dict(), MODEL_PATH)
+    with open(VOCAB_PATH,   "wb") as f: pickle.dump(vocab,         f)
+    with open(ENCODER_PATH, "wb") as f: pickle.dump(label_encoder, f)
     print("✅ Model saved.")
 
 LANGUAGES = list(label_encoder.classes_)
 
 # ── Inference ─────────────────────────────────────────────────────────────────
-def preprocess(text):
+def run_detect(text):
     cleaned = clean_text(text)
     if not cleaned:
-        return None, 0, 0, 0, 0, []
-    tokens = simple_tokenize(cleaned)
-    padded = pad_sequences(tokenizer.texts_to_sequences([cleaned]), maxlen=MAX_LEN)
-    return (padded, len(tokens), len(cleaned),
-            len(set(tokens)), len(re.findall(r"[^a-zA-Z0-9\s]", cleaned)),
-            extract_keywords(tokens))
-
-def run_detect(text):
-    padded, wc, cc, uw, sc, kw = preprocess(text)
-    if padded is None:
         return {"error": "Empty text after preprocessing"}
-    pred = model.predict(padded, verbose=0)[0]
-    idx  = int(np.argmax(pred))
+
+    tokens        = simple_tokenize(cleaned)
+    word_count    = len(tokens)
+    unique_words  = len(set(tokens))
+    char_count    = len(cleaned)
+    special_chars = len(re.findall(r"[^a-zA-Z0-9\s]", cleaned))
+    keywords      = extract_keywords(tokens)
+
+    ids    = torch.tensor([vocab.encode(text)], dtype=torch.long).to(DEVICE)
+    net.eval()
+    with torch.no_grad():
+        logits = net(ids)[0]
+        probs  = torch.softmax(logits, dim=0).cpu().numpy()
+
+    idx = int(np.argmax(probs))
     return {
         "language":      LANGUAGES[idx],
-        "confidence":    float(pred[idx]),
-        "word_count":    wc,
-        "char_count":    cc,
-        "unique_words":  uw,
-        "special_chars": sc,
-        "keywords":      kw,
-        "probabilities": [float(p) for p in pred],
+        "confidence":    float(probs[idx]),
+        "word_count":    word_count,
+        "char_count":    char_count,
+        "unique_words":  unique_words,
+        "special_chars": special_chars,
+        "keywords":      keywords,
+        "probabilities": [float(p) for p in probs],
         "all_languages": LANGUAGES,
     }
 
@@ -261,7 +327,6 @@ HTML = r"""<!DOCTYPE html>
     <p>© 2024 <span>Aravind Ugge</span> · All rights reserved</p>
   </footer>
 </div>
-
 <script>
   let chartInstance=null,detectionHistory=[],debounceTimer;
 
@@ -306,28 +371,20 @@ HTML = r"""<!DOCTYPE html>
 
   function renderChart(probs,labels){
     const paired=probs.map((p,i)=>({p,l:labels?labels[i]:'Lang'+(i+1)}));
-    paired.sort((a,b)=>b.p-a.p);
-    const top=paired.slice(0,10);
+    paired.sort((a,b)=>b.p-a.p);const top=paired.slice(0,10);
     if(chartInstance)chartInstance.destroy();
     chartInstance=new Chart(document.getElementById('probChart'),{
       type:'bar',
-      data:{
-        labels:top.map(x=>x.l),
-        datasets:[{
-          label:'Confidence %',
-          data:top.map(x=>+(x.p*100).toFixed(2)),
-          backgroundColor:top.map((_,i)=>i===0?'rgba(124,106,255,.8)':'rgba(124,106,255,.2)'),
-          borderColor:'rgba(124,106,255,.9)',borderWidth:1,borderRadius:4
-        }]
-      },
-      options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false}},
+      data:{labels:top.map(x=>x.l),datasets:[{
+        label:'Confidence %',data:top.map(x=>+(x.p*100).toFixed(2)),
+        backgroundColor:top.map((_,i)=>i===0?'rgba(124,106,255,.8)':'rgba(124,106,255,.2)'),
+        borderColor:'rgba(124,106,255,.9)',borderWidth:1,borderRadius:4
+      }]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
         scales:{
           x:{ticks:{color:'#6b6b8a',font:{size:11}},grid:{color:'rgba(255,255,255,.04)'}},
           y:{beginAtZero:true,ticks:{color:'#6b6b8a',font:{size:11},callback:v=>v+'%'},grid:{color:'rgba(255,255,255,.04)'}}
-        }
-      }
+        }}
     });
   }
 
@@ -337,22 +394,20 @@ HTML = r"""<!DOCTYPE html>
     document.getElementById('historyCard').style.display='block';
     document.getElementById('historyList').innerHTML=detectionHistory.map(h=>
       `<div class="history-item">
-        <span class="hi-text">${escHtml(h.text)}</span>
-        <span class="hi-lang">${h.lang} · ${(h.conf*100).toFixed(0)}%</span>
+         <span class="hi-text">${escHtml(h.text)}</span>
+         <span class="hi-lang">${h.lang} · ${(h.conf*100).toFixed(0)}%</span>
        </div>`).join('');
   }
 
   function clearAll(){
     document.getElementById('inputText').value='';
     document.getElementById('charCount').textContent='0';
-    document.getElementById('resultCard').style.display='none';
-    hideError();
+    document.getElementById('resultCard').style.display='none';hideError();
   }
   function showSpinner(on){document.getElementById('spinner').style.display=on?'block':'none';}
   function showError(msg){const el=document.getElementById('errorBox');el.textContent='⚠ '+msg;el.style.display='block';}
   function hideError(){document.getElementById('errorBox').style.display='none';}
   function escHtml(str){return str.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-
   function startVoiceInput(){
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR){showError('Voice input not supported in this browser.');return;}
@@ -383,8 +438,7 @@ def detect():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ── Local dev entry-point ─────────────────────────────────────────────────────
-# On Render, the gunicorn re-exec above fires before we reach here.
+# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
