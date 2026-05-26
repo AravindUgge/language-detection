@@ -1,8 +1,6 @@
-flask==3.0.3
-gunicorn==22.0.0
-pandas==2.2.2
-numpy==1.26.4
-tensorflow==2.16.2
-spacy==3.7.5
-nltk==3.8.1
-scikit-learn==1.5.1
+flask>=3.0
+gunicorn>=21.2
+numpy>=1.26
+tensorflow>=2.16
+scikit-learn>=1.4
+nltk>=3.8
