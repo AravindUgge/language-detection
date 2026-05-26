@@ -1,6 +1,6 @@
 flask==3.1.1
 gunicorn==23.0.0
 numpy==2.2.6
-torch==2.7.0
+torch==2.9.0
 scikit-learn==1.6.1
 nltk==3.9.1
